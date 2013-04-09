@@ -1,0 +1,174 @@
+<?php
+
+/**
+ * @file
+ * Provides payment method for Drupal Commerce for Pagamento Digital Brazilian
+ * payment gateway.
+ *
+ * @see http://www.pagamentodigital.com.br/
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function commerce_pagtodigital_menu() {
+  $items = array();
+
+  // Define an always accessible path to receive RAD - Retorno Automático de
+  // Data (Automatic Data Return).
+  $items['commerce-pagamentodigital/rad'] = array(
+    'page callback' => 'commerce_pagtodigital_process_rad',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+/**
+ * Processes an incoming RAD - Retorno Automático de Data (Automatic Data
+ * Return).
+ *
+ * @param $debug_rad
+ *   Optionally specify a RAD array for debug purposes; if left empty, the RAD
+ *   data will be pulled from the $_POST.
+ * @return
+ *   TRUE or FALSE indicating whether the RAD was successfully processed or not.
+ *
+ * @see https://www.pagamentodigital.com.br/site/Integracao/RetornoAutomatico/
+ */
+function commerce_pagtodigital_process_rad($debug_rad = array()) {
+  // Retrieve the RAD from $_POST if the caller did not supply an RAD array.
+  $rad = !empty($debug_rad) ? $debug_rad : $_POST;
+
+  // TODO: Check validity of incoming form data.
+  // watchdog('commerce_pagtodigital', 'Invalid RAD received and ignored.', array(), WATCHDOG_ALERT);
+
+  // TODO: Update transaction.
+}
+
+/**
+ * Implements hook_commerce_payment_method_info().
+ */
+function commerce_pagtodigital_commerce_payment_method_info() {
+  $payment_methods = array();
+
+  $payment_methods['pagamentodigital'] = array(
+    'base' => 'commerce_pagtodigital',
+    'title' => t('pagamentodigital Integration'),
+    'short_title' => t('pagamentodigital'),
+    'description' => t('pagamentodigital Integration'),
+    'terminal' => FALSE,
+    'offsite' => TRUE,
+  );
+
+  return $payment_methods;
+}
+
+/**
+ * Payment method callback: settings form.
+ */
+function commerce_pagtodigital_settings_form($settings = NULL) {
+  $settings = (array) $settings + array(
+    'email' => '',
+    'individual_items' => FALSE,
+  );
+
+  $form = array();
+  $form['email'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Email'),
+    '#description' => t('The email address used for the Pagamento Digital account you want to receive payments.'),
+    '#default_value' => $settings['email'],
+    '#required' => TRUE,
+  );
+  $form['individual_items'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Send individual items'),
+    '#description' => t('Whether to send individual line items. If unchecked only one item will be sent summarizing the entire order.'),
+    '#default_value' => $settings['individual_items'],
+  );
+
+  return $form;
+}
+
+/**
+ * Builds a pagamentodigital HTML Integration form from an order object.
+ */
+function commerce_pagtodigital_redirect_form($form, &$form_state, $order, $payment_method) {  
+$settings = $payment_method['settings'];
+
+ $order_wrapper = entity_metadata_wrapper('commerce_order', $order);
+
+  $hidden_fields = array(
+    'email_loja' => $settings['email'],
+
+    // 'PAD' means 'Padrão' (Default).
+    'tipo_integracao'=> 'PAD',
+
+    // Use the timestamp to generate a unique transaction number.
+    'id_pedido' => $order->order_number . '-' . REQUEST_TIME,
+
+    // Need to set 'frete' (Shipping cost). Setting it to zero for now.
+    'frete'=> 0,
+  );
+  
+ 
+  foreach ($order->commerce_line_items[LANGUAGE_NONE] as $key => $value) {
+    $line_item_ids[] = $value['line_item_id'];
+  }
+  $line_items = commerce_line_item_load_multiple($line_item_ids);
+
+  if ($settings['individual_items']) {
+    $index = 1;
+    foreach ($line_items as $line_item) {
+      $line_item_wrapper = entity_metadata_wrapper('commerce_line_item', $line_item);
+      if ($line_item->type == 'product') {
+        $line_item_id = $line_item_wrapper->commerce_product->product_id->value();
+      }
+      elseif ($line_item->type == 'shipping') {
+        $line_item_id = $line_item_wrapper->commerce_shipping_service->value();
+      }
+      $unit_price = commerce_price_wrapper_value($line_item_wrapper, 'commerce_unit_price', TRUE);
+      $hidden_fields = array(
+        'produto_codigo_' . $index => $line_item_id,
+        'produto_descricao_' . $index => commerce_line_item_title($line_item),
+        'produto_qtde_' . $index => round($line_item->quantity),
+        'produto_valor_' . $index => number_format(($unit_price['amount'] / 100), 2),
+          ) + $hidden_fields;
+      $index++;
+    }
+    unset($index);
+  }
+  else {
+    // Send everything as a single item.
+    $order_total = $order_wrapper->commerce_order_total->amount->value();
+    $hidden_fields = array(
+      'produto_codigo_1' => $order->order_number,
+      'produto_descricao_1' => t('Order @order_id', array('@order_id' => $order->order_number)),
+      'produto_qtde_1' => 1,
+      'produto_valor_1' => ($order_total / 100),
+        ) + $hidden_fields;
+  }
+
+  // TODO: allow setting a test server.
+  $form['#action'] = 'https://www.bcash.com.br/checkout/pay/';
+
+  // Create hidden fields.
+  foreach ($hidden_fields as $name => $value) {
+    $form[$name] = array(
+      '#type' => 'hidden',
+      '#value' => $value,
+    );
+  }
+
+  // Add pagamentodigital image button.
+  // TODO: Make it possible to choose which image to use for the button.
+  $form['submit'] = array(
+    '#type' => 'image_button',
+    '#value' => 'Comprar',
+    '#src' => 'https://www.bcash.com.br/webroot/img/bt_comprar.gif',
+  );
+
+  return $form;
+}

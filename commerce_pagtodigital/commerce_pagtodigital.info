@@ -1,0 +1,16 @@
+name = Pagamento Digital
+description = Provides a payment method for Pagamento Digital.
+package = Commerce
+dependencies[] = commerce
+dependencies[] = commerce_payment
+core = 7.x
+
+; Base module files
+files[] = commerce_pagtodigital.module
+
+; Information added by drupal.org packaging script on 2011-02-25
+version = "7.x-1.x-dev"
+core = "7.x"
+project = "commerce_pagtodigital"
+datestamp = "1298619007"
+
